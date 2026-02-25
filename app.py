@@ -43,10 +43,10 @@ except Exception:
     # Best effort compatibility shim; continue and let Streamlit report errors if any.
     pass
 
-from src.chinese_chess import Board, Color, decode, encode, solve
+from src.chinese_chess import Board, Color, decode, encode
 from src.chinese_chess.board import Move
 from src.chinese_chess.pieces import PIECE_SYMBOLS, PieceType
-from src.chinese_chess.solver import move_to_str
+from src.chinese_chess.solver import move_to_str, solve_timed
 
 # ── Visual constants ───────────────────────────────────────────────────────────
 WOOD = "#F0C070"
@@ -96,7 +96,7 @@ def init_state() -> None:
         "selected": None,
         "result": None,
         "initial_grid": None,
-        "depth": 5,
+        "time_limit": 10,
         "setup_canvas_nonce": 0,
         "upload_nonce": 0,
     }
@@ -587,20 +587,21 @@ def main() -> None:
 
             st.divider()
             st.subheader("Solve")
-            depth = st.slider(
-                "Search depth (ply)",
-                min_value=3,
-                max_value=7,
-                value=cast(int, st.session_state.depth),
+            time_limit = st.slider(
+                "Time limit (seconds)",
+                min_value=5,
+                max_value=60,
+                step=5,
+                value=cast(int, st.session_state.time_limit),
             )
-            st.session_state.depth = depth
+            st.session_state.time_limit = time_limit
 
             if st.button("▶ Solve", type="primary", use_container_width=True):
                 grid_solve: list[list[int]] = cast(list[list[int]], st.session_state.board_grid)
                 turn_color = Color.RED if st.session_state.turn == "RED" else Color.BLACK
                 board = Board.from_array(grid_solve, turn=turn_color)
-                with st.spinner("Searching for best line…"):
-                    result = solve(board, max_depth=depth)
+                with st.spinner(f"Searching… (up to {time_limit:d}s)"):
+                    result = solve_timed(board, time_limit=float(time_limit))
                 st.session_state.result = result
                 st.session_state.pv = cast(list[Move], result["pv"])
                 st.session_state.initial_grid = [row[:] for row in grid_solve]

@@ -18,6 +18,10 @@ MATE_SCORE = 90_000
 SolveResult = dict[str, object]
 
 
+class _Timeout(Exception):
+    """Raised inside alphabeta when the search deadline has passed."""
+
+
 def evaluate(board: Board) -> int:
     """Material evaluation from RED's perspective."""
     PIECE_VALUES: dict[PieceType, int] = {
@@ -53,9 +57,17 @@ def move_to_str(move: Move, board: Board) -> str:
 
 
 def alphabeta(
-    board: Board, depth: int, alpha: int, beta: int, maximizing: bool
+    board: Board,
+    depth: int,
+    alpha: int,
+    beta: int,
+    maximizing: bool,
+    deadline: float = float("inf"),
 ) -> tuple[int, list[Move]]:
-    """Alpha-beta pruning. Returns (score, pv_line)."""
+    """Alpha-beta pruning. Returns (score, pv_line). Raises _Timeout if deadline passed."""
+    if time.perf_counter() > deadline:
+        raise _Timeout()
+
     if board.is_checkmate():
         # Current player has no moves and is in check → they lose.
         # Use +depth so shorter mates (more remaining depth) score higher.
@@ -77,7 +89,7 @@ def alphabeta(
         best = -INF
         for move in moves:
             child = board.apply_move(move)
-            score, line = alphabeta(child, depth - 1, alpha, beta, False)
+            score, line = alphabeta(child, depth - 1, alpha, beta, False, deadline)
             if score > best:
                 best = score
                 best_line = [move] + line
@@ -89,7 +101,7 @@ def alphabeta(
         best = INF
         for move in moves:
             child = board.apply_move(move)
-            score, line = alphabeta(child, depth - 1, alpha, beta, True)
+            score, line = alphabeta(child, depth - 1, alpha, beta, True, deadline)
             if score < best:
                 best = score
                 best_line = [move] + line
@@ -99,10 +111,11 @@ def alphabeta(
         return best, best_line
 
 
-def solve(board: Board, max_depth: int = 5) -> SolveResult:
+def solve(board: Board, max_depth: int = 5, deadline: float = float("inf")) -> SolveResult:
     """
     Solve a cờ thế puzzle. Searches for forced mate up to max_depth plies.
     Returns dict with 'score', 'pv' (principal variation), 'mate_in'.
+    Raises _Timeout if deadline is exceeded mid-search.
     """
     logger.info("Solving | turn={} | depth={}", board.turn.name, max_depth)
 
@@ -136,7 +149,7 @@ def solve(board: Board, max_depth: int = 5) -> SolveResult:
     for i, move in enumerate(moves, 1):
         notation = move_to_str(move, board)
         child = board.apply_move(move)
-        score, line = alphabeta(child, max_depth - 1, alpha, beta, not maximizing)
+        score, line = alphabeta(child, max_depth - 1, alpha, beta, not maximizing, deadline)
         logger.debug("[{}/{}] {} → score={}", i, len(moves), notation, score)
 
         if (maximizing and score > best) or (not maximizing and score < best):
@@ -165,6 +178,46 @@ def solve(board: Board, max_depth: int = 5) -> SolveResult:
         logger.info("Result | score={} | pv={} ply | {:.3f}s", best, len(best_line), elapsed)
 
     return result
+
+
+def solve_timed(board: Board, time_limit: float = 10.0) -> SolveResult:
+    """
+    Iterative deepening search with a time limit.
+    Searches depths 3, 5, 7, … until time runs out, returning the result
+    from the deepest fully completed search.
+    """
+    logger.info("Solving (time limit: {:.1f}s) | turn={}", time_limit, board.turn.name)
+    t0 = time.perf_counter()
+    deadline = t0 + time_limit
+
+    maximizing = board.turn == Color.RED
+    if board.is_checkmate():
+        score = -MATE_SCORE if maximizing else MATE_SCORE
+        return {"score": score, "pv": [], "mate_in": 0}
+    if board.is_stalemate():
+        score = -MATE_SCORE if maximizing else MATE_SCORE
+        return {"score": score, "pv": [], "mate_in": 0}
+
+    best_result: SolveResult = {"score": evaluate(board), "pv": [], "mate_in": None}
+
+    for depth in range(3, 200, 2):
+        if time.perf_counter() >= deadline:
+            logger.info("Time limit reached before starting depth {}", depth)
+            break
+        try:
+            result = solve(board, max_depth=depth, deadline=deadline)
+            best_result = result
+            elapsed = time.perf_counter() - t0
+            logger.info("Depth {} done | mate_in={} | {:.2f}s", depth, result["mate_in"], elapsed)
+            if result["mate_in"] is not None:
+                logger.info("Found forced mate in {}, stopping early", result["mate_in"])
+                break
+        except _Timeout:
+            elapsed = time.perf_counter() - t0
+            logger.info("Timeout during depth {} search | {:.2f}s elapsed", depth, elapsed)
+            break
+
+    return best_result
 
 
 def print_solution(board: Board, result: SolveResult) -> None:
