@@ -57,11 +57,14 @@ def alphabeta(
 ) -> tuple[int, list[Move]]:
     """Alpha-beta pruning. Returns (score, pv_line)."""
     if board.is_checkmate():
-        # Current player is mated → they lose. Prefer mates found sooner (higher depth remaining).
-        return (-MATE_SCORE + depth, []) if maximizing else (MATE_SCORE - depth, [])
+        # Current player has no moves and is in check → they lose.
+        # Use +depth so shorter mates (more remaining depth) score higher.
+        return (-MATE_SCORE - depth, []) if maximizing else (MATE_SCORE + depth, [])
 
     if board.is_stalemate():
-        return (0, [])
+        # In Chinese chess, stalemate (困毙) is a loss for the player with no moves.
+        # Same scoring convention as checkmate.
+        return (-MATE_SCORE - depth, []) if maximizing else (MATE_SCORE + depth, [])
 
     if depth == 0:
         return (evaluate(board), [])
@@ -111,13 +114,15 @@ def solve(board: Board, max_depth: int = 5) -> SolveResult:
     maximizing = board.turn == Color.RED
 
     if board.is_checkmate():
-        score = (-MATE_SCORE + max_depth) if maximizing else (MATE_SCORE - max_depth)
+        score = (-MATE_SCORE - max_depth) if maximizing else (MATE_SCORE + max_depth)
         logger.info("Already in checkmate | score={}", score)
         return {"score": score, "pv": [], "mate_in": 0}
 
     if board.is_stalemate():
-        logger.info("Already in stalemate")
-        return {"score": 0, "pv": [], "mate_in": None}
+        # In Chinese chess, stalemate (困毙) is a loss for the player with no moves
+        score = (-MATE_SCORE - max_depth) if maximizing else (MATE_SCORE + max_depth)
+        logger.info("Already in stalemate (困毙) | score={}", score)
+        return {"score": score, "pv": [], "mate_in": 0}
 
     moves = board.legal_moves()
     assert len(moves) > 0, "No moves but neither checkmate nor stalemate — legality bug"
@@ -150,8 +155,8 @@ def solve(board: Board, max_depth: int = 5) -> SolveResult:
     elapsed = time.perf_counter() - t0
     result: SolveResult = {"score": best, "pv": best_line, "mate_in": None}
 
-    if abs(best) >= MATE_SCORE - max_depth:
-        plies = max_depth - (MATE_SCORE - abs(best))
+    if abs(best) >= MATE_SCORE:
+        plies = max_depth - (abs(best) - MATE_SCORE)
         result["mate_in"] = (plies + 1) // 2
 
     if result["mate_in"] is not None:
