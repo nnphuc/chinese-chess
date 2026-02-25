@@ -5,6 +5,10 @@ Uses minimax with alpha-beta pruning to find forced mate sequences.
 
 from __future__ import annotations
 
+import time
+
+from loguru import logger
+
 from .board import Board, Move, decode
 from .pieces import PIECE_SYMBOLS, Color, PieceType
 
@@ -97,18 +101,63 @@ def solve(board: Board, max_depth: int = 5) -> SolveResult:
     Solve a cờ thế puzzle. Searches for forced mate up to max_depth plies.
     Returns dict with 'score', 'pv' (principal variation), 'mate_in'.
     """
+    logger.info("Solving | turn={} | depth={}", board.turn.name, max_depth)
+
+    if max_depth == 0:
+        score = evaluate(board)
+        logger.debug("Depth 0 evaluation: {}", score)
+        return {"score": score, "pv": [], "mate_in": None}
+
     maximizing = board.turn == Color.RED
-    score, pv = alphabeta(board, max_depth, -INF, INF, maximizing)
 
-    result: SolveResult = {"score": score, "pv": pv, "mate_in": None}
+    if board.is_checkmate():
+        score = (-MATE_SCORE + max_depth) if maximizing else (MATE_SCORE - max_depth)
+        logger.info("Already in checkmate | score={}", score)
+        return {"score": score, "pv": [], "mate_in": 0}
 
-    # Mate score = MATE_SCORE - depth_at_terminal (always < MATE_SCORE).
-    # Threshold: any score that couldn't be from material alone (material max ~10k).
-    if abs(score) >= MATE_SCORE - max_depth:
-        # depth_at_terminal = MATE_SCORE - abs(score)
-        # plies consumed = max_depth - depth_at_terminal
-        plies = max_depth - (MATE_SCORE - abs(score))
+    if board.is_stalemate():
+        logger.info("Already in stalemate")
+        return {"score": 0, "pv": [], "mate_in": None}
+
+    moves = board.legal_moves()
+    assert len(moves) > 0, "No moves but neither checkmate nor stalemate — legality bug"
+    logger.info("Top-level candidates: {} move(s)", len(moves))
+
+    alpha, beta = -INF, INF
+    best = -INF if maximizing else INF
+    best_line: list[Move] = []
+    t0 = time.perf_counter()
+
+    for i, move in enumerate(moves, 1):
+        notation = move_to_str(move, board)
+        child = board.apply_move(move)
+        score, line = alphabeta(child, max_depth - 1, alpha, beta, not maximizing)
+        logger.debug("[{}/{}] {} → score={}", i, len(moves), notation, score)
+
+        if (maximizing and score > best) or (not maximizing and score < best):
+            best = score
+            best_line = [move] + line
+            logger.debug("  New best: {}", best)
+
+        if maximizing:
+            alpha = max(alpha, best)
+        else:
+            beta = min(beta, best)
+        if beta <= alpha:
+            logger.debug("  Pruned after {}/{} moves", i, len(moves))
+            break
+
+    elapsed = time.perf_counter() - t0
+    result: SolveResult = {"score": best, "pv": best_line, "mate_in": None}
+
+    if abs(best) >= MATE_SCORE - max_depth:
+        plies = max_depth - (MATE_SCORE - abs(best))
         result["mate_in"] = (plies + 1) // 2
+
+    if result["mate_in"] is not None:
+        logger.info("Result | Mate in {} | {:.3f}s", result["mate_in"], elapsed)
+    else:
+        logger.info("Result | score={} | pv={} ply | {:.3f}s", best, len(best_line), elapsed)
 
     return result
 

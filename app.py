@@ -6,11 +6,13 @@ Run with: uv run streamlit run app.py
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import cast
 
 import streamlit as st
 import streamlit.elements.image as st_image
+from loguru import logger
 from PIL import Image, ImageDraw, ImageFont
 from streamlit_drawable_canvas import st_canvas  # type: ignore[import-not-found]
 
@@ -96,6 +98,7 @@ def init_state() -> None:
         "initial_grid": None,
         "depth": 5,
         "setup_canvas_nonce": 0,
+        "upload_nonce": 0,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -143,7 +146,6 @@ def _piece_circle(val: int, bg: str, inherit_bg: bool = False) -> str:
 def _board_table(
     grid: list[list[int]],
     last_move: Move | None = None,
-    clickable: bool = False,
 ) -> str:
     """Return a <table> HTML string for the board."""
     highlight: set[tuple[int, int]] = set()
@@ -181,15 +183,7 @@ def _board_table(
                 f"width:56px;height:54px;text-align:center;vertical-align:middle;"
                 f"border:1px solid {BORDER_COLOR};background:{bg};"
             )
-
-            if clickable:
-                td_s += "cursor:pointer;"
-                cells.append(
-                    f"<td class='cell' style='{td_s}' onclick='clickCell({r},{c})'>"
-                    f"{_piece_circle(val, bg, inherit_bg=True)}</td>"
-                )
-            else:
-                cells.append(f"<td style='{td_s}'>{_piece_circle(val, bg)}</td>")
+            cells.append(f"<td style='{td_s}'>{_piece_circle(val, bg)}</td>")
 
         cells.append(f"<td style='{rank_s}'>{rank}</td>")
         rows.append(f"<tr>{''.join(cells)}</tr>")
@@ -209,7 +203,7 @@ def _board_table(
 
 def board_to_html(grid: list[list[int]], last_move: Move | None = None) -> str:
     """Read-only board for st.markdown()."""
-    return _board_table(grid, last_move, clickable=False)
+    return _board_table(grid, last_move)
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -337,7 +331,10 @@ def render_setup_canvas(grid: list[list[int]]) -> None:
 
     cell = _canvas_click_to_cell(x, y)
     if cell is None:
-        return
+        return  # outside board — skip rerun
+
+    if cast(str | None, st.session_state.selected) is None:
+        return  # nothing selected — skip rerun
 
     r, c = cell
     handle_cell_click(r, c)
@@ -401,6 +398,28 @@ PUZZLES: dict[str, Callable[[], None] | None] = {
 }
 
 
+# ── Setup board ───────────────────────────────────────────────────────────────
+
+
+def _render_setup_board() -> None:
+    """Info message + canvas for piece placement."""
+    grid = cast(list[list[int]], st.session_state.board_grid)
+    sel = cast(str | None, st.session_state.selected)
+
+    if sel == "ERASE":
+        st.info("✕ Erase mode — click a cell to remove its piece")
+    elif sel:
+        color_str, pt_str = sel.split("_", 1)
+        pt = PieceType[pt_str]
+        color = Color.RED if color_str == "RED" else Color.BLACK
+        sym = PIECE_SYMBOLS[(color, pt)]
+        st.info(f"Placing: {color_str} {sym} ({PIECE_LABEL[pt]}) — click a board cell")
+    else:
+        st.caption("Select a piece from the sidebar, then click a board cell to place it.")
+
+    render_setup_canvas(grid)
+
+
 # ── Main app ──────────────────────────────────────────────────────────────────
 
 
@@ -410,12 +429,12 @@ def main() -> None:
     # Style sidebar palette buttons
     st.markdown(
         """<style>
-        section[data-testid="stSidebar"] .stButton button {{
+        section[data-testid="stSidebar"] .stButton button {
             min-height: 38px;
             padding: 4px !important;
             font-size: 18px !important;
             font-family: 'Noto Serif SC', STSong, serif !important;
-        }}
+        }
         </style>""",
         unsafe_allow_html=True,
     )
@@ -447,6 +466,63 @@ def main() -> None:
             st.session_state.selected = None
             st.session_state.setup_canvas_nonce = cast(int, st.session_state.setup_canvas_nonce) + 1
             st.rerun()
+
+        st.divider()
+
+        st.subheader("Save / Load Game")
+
+        game_json = json.dumps(
+            {
+                "grid": cast(list[list[int]], st.session_state.board_grid),
+                "turn": cast(str, st.session_state.turn),
+            },
+            indent=2,
+        )
+        st.download_button(
+            label="💾 Save Game",
+            data=game_json,
+            file_name="chinese_chess_game.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+        upload_nonce = cast(int, st.session_state.upload_nonce)
+        loaded_file = st.file_uploader(
+            "Load game file (JSON)",
+            type=["json"],
+            label_visibility="collapsed",
+            key=f"game_upload_{upload_nonce}",
+        )
+        if loaded_file is not None:
+            try:
+                raw = json.loads(loaded_file.read())
+                grid = raw["grid"]
+                turn = raw["turn"]
+                if (
+                    isinstance(grid, list)
+                    and len(grid) == 10
+                    and all(isinstance(row, list) and len(row) == 9 for row in grid)
+                    and isinstance(turn, str)
+                    and turn in ("RED", "BLACK")
+                ):
+                    st.session_state.board_grid = grid
+                    st.session_state.turn = turn
+                    st.session_state.mode = "setup"
+                    st.session_state.pv = []
+                    st.session_state.step = 0
+                    st.session_state.result = None
+                    st.session_state.selected = None
+                    st.session_state.upload_nonce = upload_nonce + 1
+                    st.session_state.setup_canvas_nonce = (
+                        cast(int, st.session_state.setup_canvas_nonce) + 1
+                    )
+                    logger.info("Game loaded | turn={}", turn)
+                    st.rerun()
+                else:
+                    st.error("Invalid game file format.")
+            except Exception as e:
+                st.error(f"Failed to load game: {e}")
+                logger.error("Failed to load game file: {}", e)
 
         st.divider()
 
@@ -504,7 +580,9 @@ def main() -> None:
             if clear_col.button("🗑 Clear", use_container_width=True):
                 st.session_state.board_grid = [[0] * 9 for _ in range(10)]
                 st.session_state.selected = None
-                st.session_state.setup_canvas_nonce = cast(int, st.session_state.setup_canvas_nonce) + 1
+                st.session_state.setup_canvas_nonce = (
+                    cast(int, st.session_state.setup_canvas_nonce) + 1
+                )
                 st.rerun()
 
             st.divider()
@@ -518,14 +596,14 @@ def main() -> None:
             st.session_state.depth = depth
 
             if st.button("▶ Solve", type="primary", use_container_width=True):
-                grid: list[list[int]] = cast(list[list[int]], st.session_state.board_grid)
-                turn = Color.RED if st.session_state.turn == "RED" else Color.BLACK
-                board = Board.from_array(grid, turn=turn)
+                grid_solve: list[list[int]] = cast(list[list[int]], st.session_state.board_grid)
+                turn_color = Color.RED if st.session_state.turn == "RED" else Color.BLACK
+                board = Board.from_array(grid_solve, turn=turn_color)
                 with st.spinner("Searching for best line…"):
                     result = solve(board, max_depth=depth)
                 st.session_state.result = result
                 st.session_state.pv = cast(list[Move], result["pv"])
-                st.session_state.initial_grid = [row[:] for row in grid]
+                st.session_state.initial_grid = [row[:] for row in grid_solve]
                 st.session_state.step = 0
                 st.session_state.mode = "replay"
                 st.rerun()
@@ -549,7 +627,9 @@ def main() -> None:
                 st.session_state.mode = "setup"
                 st.session_state.step = 0
                 st.session_state.selected = None
-                st.session_state.setup_canvas_nonce = cast(int, st.session_state.setup_canvas_nonce) + 1
+                st.session_state.setup_canvas_nonce = (
+                    cast(int, st.session_state.setup_canvas_nonce) + 1
+                )
                 st.rerun()
 
     # ── Main area ─────────────────────────────────────────────────────────────
@@ -557,21 +637,7 @@ def main() -> None:
 
     if mode == "setup":
         st.header("Position Setup")
-
-        sel: str | None = cast(str | None, st.session_state.selected)
-        if sel == "ERASE":
-            st.info("✕ Erase mode — click a cell to remove its piece")
-        elif sel:
-            color_str, pt_str = sel.split("_", 1)
-            pt = PieceType[pt_str]
-            color = Color.RED if color_str == "RED" else Color.BLACK
-            sym = PIECE_SYMBOLS[(color, pt)]
-            st.info(f"Placing: {color_str} {sym} ({PIECE_LABEL[pt]}) — click a board cell")
-        else:
-            st.caption("Select a piece from the sidebar, then click a board cell to place it.")
-
-        grid_setup: list[list[int]] = cast(list[list[int]], st.session_state.board_grid)
-        render_setup_canvas(grid_setup)
+        _render_setup_board()
 
     else:  # replay mode
         pv: list[Move] = cast(list[Move], st.session_state.pv)
