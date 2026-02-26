@@ -56,13 +56,34 @@ WOOD_HIGHLIGHT = "#FFE066"
 BORDER_COLOR = "#8B6914"
 RED_FG = "#CC0000"
 BLACK_FG = "#111111"
-CANVAS_W = 620
-CANVAS_H = 650
-CANVAS_MARGIN_X = 58
-CANVAS_MARGIN_Y = 58
-CANVAS_DX = 63
-CANVAS_DY = 59
-CANVAS_PIECE_R = 22
+BOARD_SCALE = 0.82
+
+
+def _scale(px: int) -> int:
+    return max(1, round(px * BOARD_SCALE))
+
+
+CANVAS_W = _scale(620)
+CANVAS_H = _scale(650)
+CANVAS_MARGIN_X = _scale(58)
+CANVAS_MARGIN_Y = _scale(58)
+CANVAS_DX = _scale(63)
+CANVAS_DY = _scale(59)
+CANVAS_PIECE_R = _scale(22)
+
+HTML_CELL_W = _scale(56)
+HTML_CELL_H = _scale(54)
+HTML_HEADER_H = _scale(22)
+HTML_SIDE_W = _scale(26)
+HTML_RIVER_H = _scale(26)
+HTML_PIECE_SIZE = _scale(44)
+HTML_PIECE_FONT = _scale(21)
+HTML_DOT_FONT = _scale(16)
+HTML_BORDER_W = max(1.0, round(2.5 * BOARD_SCALE, 2))
+HTML_HEADER_FONT = _scale(11)
+HTML_RANK_FONT = _scale(11)
+HTML_RIVER_FONT = _scale(13)
+HTML_RIVER_LETTER_SPACING = _scale(6)
 
 PIECE_ORDER: list[PieceType] = [
     PieceType.KING,
@@ -133,16 +154,16 @@ def get_board_at_step(step: int) -> Board:
 
 def _piece_circle(val: int, bg: str, inherit_bg: bool = False) -> str:
     if val == 0:
-        return f"<span style='color:{BORDER_COLOR};font-size:16px;'>·</span>"
+        return f"<span style='color:{BORDER_COLOR};font-size:{HTML_DOT_FONT}px;'>·</span>"
     color, pt = decode(val)
     sym = PIECE_SYMBOLS[(color, pt)]
     fg = RED_FG if color == Color.RED else BLACK_FG
     piece_bg = "inherit" if inherit_bg else bg
     return (
-        f"<div style='width:44px;height:44px;border-radius:50%;"
-        f"border:2.5px solid {fg};background:{piece_bg};"
+        f"<div style='width:{HTML_PIECE_SIZE}px;height:{HTML_PIECE_SIZE}px;border-radius:50%;"
+        f"border:{HTML_BORDER_W}px solid {fg};background:{piece_bg};"
         f"display:inline-flex;align-items:center;justify-content:center;"
-        f"font-size:21px;font-weight:bold;color:{fg};line-height:1;'>{sym}</div>"
+        f"font-size:{HTML_PIECE_FONT}px;font-weight:bold;color:{fg};line-height:1;'>{sym}</div>"
     )
 
 
@@ -157,9 +178,12 @@ def _board_table(
         highlight = {(r1, c1), (r2, c2)}
 
     hdr = (
-        "width:56px;height:22px;text-align:center;font-size:11px;color:#6B4C11;font-weight:normal;"
+        f"width:{HTML_CELL_W}px;height:{HTML_HEADER_H}px;text-align:center;"
+        f"font-size:{HTML_HEADER_FONT}px;color:#6B4C11;font-weight:normal;"
     )
-    rank_s = "width:26px;text-align:center;font-size:11px;color:#6B4C11;"
+    rank_s = (
+        f"width:{HTML_SIDE_W}px;text-align:center;font-size:{HTML_RANK_FONT}px;color:#6B4C11;"
+    )
     table_s = (
         f"border-collapse:collapse;background:{WOOD};"
         "font-family:'Noto Serif SC','Noto Serif CJK SC',STSong,serif;margin:0 auto;"
@@ -167,7 +191,9 @@ def _board_table(
 
     rows: list[str] = []
     col_hdrs = "".join(f"<th style='{hdr}'>{ch}</th>" for ch in "abcdefghi")
-    rows.append(f"<tr><th style='width:26px;'></th>{col_hdrs}<th style='width:26px;'></th></tr>")
+    rows.append(
+        f"<tr><th style='width:{HTML_SIDE_W}px;'></th>{col_hdrs}<th style='width:{HTML_SIDE_W}px;'></th></tr>"
+    )
 
     for r in range(10):
         rank = 9 - r
@@ -183,7 +209,7 @@ def _board_table(
                 bg = WOOD
 
             td_s = (
-                f"width:56px;height:54px;text-align:center;vertical-align:middle;"
+                f"width:{HTML_CELL_W}px;height:{HTML_CELL_H}px;text-align:center;vertical-align:middle;"
                 f"border:1px solid {BORDER_COLOR};background:{bg};"
             )
             cells.append(f"<td style='{td_s}'>{_piece_circle(val, bg)}</td>")
@@ -193,9 +219,9 @@ def _board_table(
 
         if r == 4:
             river = (
-                f"<td colspan='9' style='height:26px;background:{WOOD};"
-                f"text-align:center;font-size:13px;color:{BORDER_COLOR};"
-                f"letter-spacing:6px;"
+                f"<td colspan='9' style='height:{HTML_RIVER_H}px;background:{WOOD};"
+                f"text-align:center;font-size:{HTML_RIVER_FONT}px;color:{BORDER_COLOR};"
+                f"letter-spacing:{HTML_RIVER_LETTER_SPACING}px;"
                 f"border-left:1px solid {BORDER_COLOR};border-right:1px solid {BORDER_COLOR};'>"
                 "楚河&nbsp;&nbsp;&nbsp;&nbsp;漢界</td>"
             )
@@ -248,9 +274,9 @@ def _setup_board_image(grid: list[list[int]]) -> Image.Image:
     draw.line([(x0 + 3 * dx, y0 + 7 * dy), (x0 + 5 * dx, y0 + 9 * dy)], fill=BORDER_COLOR, width=2)
     draw.line([(x0 + 5 * dx, y0 + 7 * dy), (x0 + 3 * dx, y0 + 9 * dy)], fill=BORDER_COLOR, width=2)
 
-    label_font = _font(20)
-    coord_font = _font(16)
-    piece_font = _font(28)
+    label_font = _font(_scale(20))
+    coord_font = _font(_scale(16))
+    piece_font = _font(_scale(28))
 
     draw.text(
         (x0 + 4 * dx, y0 + int(4.5 * dy)),
@@ -261,12 +287,12 @@ def _setup_board_image(grid: list[list[int]]) -> Image.Image:
     )
 
     for c, ch in enumerate("abcdefghi"):
-        draw.text((x0 + c * dx, y0 - 26), ch, fill=BORDER_COLOR, font=coord_font, anchor="mm")
+        draw.text((x0 + c * dx, y0 - _scale(26)), ch, fill=BORDER_COLOR, font=coord_font, anchor="mm")
     for r in range(10):
         y = y0 + r * dy
         rank = str(9 - r)
-        draw.text((x0 - 28, y), rank, fill=BORDER_COLOR, font=coord_font, anchor="mm")
-        draw.text((x0 + 8 * dx + 28, y), rank, fill=BORDER_COLOR, font=coord_font, anchor="mm")
+        draw.text((x0 - _scale(28), y), rank, fill=BORDER_COLOR, font=coord_font, anchor="mm")
+        draw.text((x0 + 8 * dx + _scale(28), y), rank, fill=BORDER_COLOR, font=coord_font, anchor="mm")
 
     for r in range(10):
         for c in range(9):
@@ -686,7 +712,12 @@ def main() -> None:
         st.markdown(board_to_html(grid_now, last_move), unsafe_allow_html=True)
 
         st.markdown("")
-        prev_col, info_col, auto_col, next_col = st.columns([2, 3, 2, 2])
+        first_col, prev_col, info_col, auto_col, next_col = st.columns([2, 2, 3, 2, 2])
+        if first_col.button(
+            "≪ First", disabled=(step == 0 or auto_play), use_container_width=True
+        ):
+            st.session_state.step = 0
+            st.rerun()
         if prev_col.button("← Prev", disabled=(step == 0 or auto_play), use_container_width=True):
             st.session_state.step = step - 1
             st.rerun()
