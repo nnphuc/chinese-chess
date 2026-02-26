@@ -97,7 +97,7 @@ def init_state() -> None:
         "selected": None,
         "result": None,
         "initial_grid": None,
-        "time_limit": 1,
+        "time_limit": 10,
         "auto_play": False,
         "auto_delay": 1.5,
         "setup_canvas_nonce": 0,
