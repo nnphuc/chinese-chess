@@ -96,7 +96,7 @@ def init_state() -> None:
         "selected": None,
         "result": None,
         "initial_grid": None,
-        "time_limit": 10,
+        "time_limit": 1,
         "setup_canvas_nonce": 0,
         "upload_nonce": 0,
     }
@@ -587,21 +587,21 @@ def main() -> None:
 
             st.divider()
             st.subheader("Solve")
-            time_limit = st.slider(
-                "Time limit (seconds)",
-                min_value=5,
+            time_limit_min = st.slider(
+                "Time limit (minutes)",
+                min_value=1,
                 max_value=60,
-                step=5,
+                step=1,
                 value=cast(int, st.session_state.time_limit),
             )
-            st.session_state.time_limit = time_limit
+            st.session_state.time_limit = time_limit_min
 
             if st.button("▶ Solve", type="primary", use_container_width=True):
                 grid_solve: list[list[int]] = cast(list[list[int]], st.session_state.board_grid)
                 turn_color = Color.RED if st.session_state.turn == "RED" else Color.BLACK
                 board = Board.from_array(grid_solve, turn=turn_color)
-                with st.spinner(f"Searching… (up to {time_limit:d}s)"):
-                    result = solve_timed(board, time_limit=float(time_limit))
+                with st.spinner(f"Searching… (up to {time_limit_min:d} min)"):
+                    result = solve_timed(board, time_limit=float(time_limit_min) * 60)
                 st.session_state.result = result
                 st.session_state.pv = cast(list[Move], result["pv"])
                 st.session_state.initial_grid = [row[:] for row in grid_solve]
