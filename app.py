@@ -7,6 +7,7 @@ Run with: uv run streamlit run app.py
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from typing import cast
 
@@ -97,6 +98,8 @@ def init_state() -> None:
         "result": None,
         "initial_grid": None,
         "time_limit": 1,
+        "auto_play": False,
+        "auto_delay": 1.5,
         "setup_canvas_nonce": 0,
         "upload_nonce": 0,
     }
@@ -624,9 +627,22 @@ def main() -> None:
                 else:
                     st.warning("No solution found.")
 
+            st.divider()
+            st.subheader("Auto Play")
+            auto_delay_val = st.slider(
+                "Delay per step (s)",
+                min_value=0.5,
+                max_value=5.0,
+                step=0.5,
+                value=cast(float, st.session_state.auto_delay),
+            )
+            st.session_state.auto_delay = auto_delay_val
+
+            st.divider()
             if st.button("← Back to Setup", use_container_width=True):
                 st.session_state.mode = "setup"
                 st.session_state.step = 0
+                st.session_state.auto_play = False
                 st.session_state.selected = None
                 st.session_state.setup_canvas_nonce = (
                     cast(int, st.session_state.setup_canvas_nonce) + 1
@@ -644,6 +660,8 @@ def main() -> None:
         pv: list[Move] = cast(list[Move], st.session_state.pv)
         step: int = cast(int, st.session_state.step)
         total = len(pv)
+        auto_play: bool = cast(bool, st.session_state.auto_play)
+        auto_delay: float = cast(float, st.session_state.auto_delay)
 
         st.header("Solution Replay")
 
@@ -668,8 +686,8 @@ def main() -> None:
         st.markdown(board_to_html(grid_now, last_move), unsafe_allow_html=True)
 
         st.markdown("")
-        prev_col, info_col, next_col = st.columns([2, 3, 2])
-        if prev_col.button("← Prev", disabled=(step == 0), use_container_width=True):
+        prev_col, info_col, auto_col, next_col = st.columns([2, 3, 2, 2])
+        if prev_col.button("← Prev", disabled=(step == 0 or auto_play), use_container_width=True):
             st.session_state.step = step - 1
             st.rerun()
         info_col.markdown(
@@ -677,9 +695,31 @@ def main() -> None:
             f"Step {step} / {total}</div>",
             unsafe_allow_html=True,
         )
-        if next_col.button("Next →", disabled=(step >= total), use_container_width=True):
+        if auto_play:
+            if auto_col.button("⏹ Stop", use_container_width=True, type="primary"):
+                st.session_state.auto_play = False
+                st.rerun()
+        else:
+            if auto_col.button("▶▶ Auto", disabled=(step >= total), use_container_width=True):
+                st.session_state.auto_play = True
+                st.rerun()
+        if next_col.button(
+            "Next →", disabled=(step >= total or auto_play), use_container_width=True
+        ):
             st.session_state.step = step + 1
             st.rerun()
+
+        # Auto-advance: sleep then move to next step.  Runs after all UI is
+        # rendered so the user sees the current board before it advances.
+        if auto_play:
+            if step < total:
+                time.sleep(auto_delay)
+                st.session_state.step = step + 1
+                if step + 1 >= total:
+                    st.session_state.auto_play = False
+                st.rerun()
+            else:
+                st.session_state.auto_play = False
 
 
 if __name__ == "__main__":
