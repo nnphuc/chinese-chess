@@ -6,6 +6,7 @@ Run with: uv run streamlit run app.py
 
 from __future__ import annotations
 
+import functools
 import json
 import time
 from collections.abc import Callable
@@ -85,6 +86,12 @@ HTML_RANK_FONT = _scale(11)
 HTML_RIVER_FONT = _scale(13)
 HTML_RIVER_LETTER_SPACING = _scale(6)
 
+CANVAS_LABEL_FONT_SIZE = _scale(20)
+CANVAS_COORD_FONT_SIZE = _scale(16)
+CANVAS_PIECE_FONT_SIZE = _scale(28)
+CANVAS_COORD_OFFSET_TOP = _scale(26)
+CANVAS_COORD_OFFSET_SIDE = _scale(28)
+
 PIECE_ORDER: list[PieceType] = [
     PieceType.KING,
     PieceType.ADVISOR,
@@ -106,6 +113,17 @@ PIECE_LABEL: dict[PieceType, str] = {
 }
 
 # ── Session state ──────────────────────────────────────────────────────────────
+
+
+def _reset_to_setup() -> None:
+    """Reset session state to setup mode, clearing solver results."""
+    st.session_state.mode = "setup"
+    st.session_state.pv = []
+    st.session_state.step = 0
+    st.session_state.result = None
+    st.session_state.selected = None
+    st.session_state.auto_play = False
+    st.session_state.setup_canvas_nonce = cast(int, st.session_state.setup_canvas_nonce) + 1
 
 
 def init_state() -> None:
@@ -181,9 +199,7 @@ def _board_table(
         f"width:{HTML_CELL_W}px;height:{HTML_HEADER_H}px;text-align:center;"
         f"font-size:{HTML_HEADER_FONT}px;color:#6B4C11;font-weight:normal;"
     )
-    rank_s = (
-        f"width:{HTML_SIDE_W}px;text-align:center;font-size:{HTML_RANK_FONT}px;color:#6B4C11;"
-    )
+    rank_s = f"width:{HTML_SIDE_W}px;text-align:center;font-size:{HTML_RANK_FONT}px;color:#6B4C11;"
     table_s = (
         f"border-collapse:collapse;background:{WOOD};"
         "font-family:'Noto Serif SC','Noto Serif CJK SC',STSong,serif;margin:0 auto;"
@@ -191,9 +207,8 @@ def _board_table(
 
     rows: list[str] = []
     col_hdrs = "".join(f"<th style='{hdr}'>{ch}</th>" for ch in "abcdefghi")
-    rows.append(
-        f"<tr><th style='width:{HTML_SIDE_W}px;'></th>{col_hdrs}<th style='width:{HTML_SIDE_W}px;'></th></tr>"
-    )
+    side_th = f"<th style='width:{HTML_SIDE_W}px;'></th>"
+    rows.append(f"<tr>{side_th}{col_hdrs}{side_th}</tr>")
 
     for r in range(10):
         rank = 9 - r
@@ -235,6 +250,7 @@ def board_to_html(grid: list[list[int]], last_move: Move | None = None) -> str:
     return _board_table(grid, last_move)
 
 
+@functools.lru_cache(maxsize=16)
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     for path in (
         "/System/Library/Fonts/STHeiti Medium.ttc",
@@ -274,9 +290,9 @@ def _setup_board_image(grid: list[list[int]]) -> Image.Image:
     draw.line([(x0 + 3 * dx, y0 + 7 * dy), (x0 + 5 * dx, y0 + 9 * dy)], fill=BORDER_COLOR, width=2)
     draw.line([(x0 + 5 * dx, y0 + 7 * dy), (x0 + 3 * dx, y0 + 9 * dy)], fill=BORDER_COLOR, width=2)
 
-    label_font = _font(_scale(20))
-    coord_font = _font(_scale(16))
-    piece_font = _font(_scale(28))
+    label_font = _font(CANVAS_LABEL_FONT_SIZE)
+    coord_font = _font(CANVAS_COORD_FONT_SIZE)
+    piece_font = _font(CANVAS_PIECE_FONT_SIZE)
 
     draw.text(
         (x0 + 4 * dx, y0 + int(4.5 * dy)),
@@ -287,12 +303,30 @@ def _setup_board_image(grid: list[list[int]]) -> Image.Image:
     )
 
     for c, ch in enumerate("abcdefghi"):
-        draw.text((x0 + c * dx, y0 - _scale(26)), ch, fill=BORDER_COLOR, font=coord_font, anchor="mm")
+        draw.text(
+            (x0 + c * dx, y0 - CANVAS_COORD_OFFSET_TOP),
+            ch,
+            fill=BORDER_COLOR,
+            font=coord_font,
+            anchor="mm",
+        )
     for r in range(10):
         y = y0 + r * dy
         rank = str(9 - r)
-        draw.text((x0 - _scale(28), y), rank, fill=BORDER_COLOR, font=coord_font, anchor="mm")
-        draw.text((x0 + 8 * dx + _scale(28), y), rank, fill=BORDER_COLOR, font=coord_font, anchor="mm")
+        draw.text(
+            (x0 - CANVAS_COORD_OFFSET_SIDE, y),
+            rank,
+            fill=BORDER_COLOR,
+            font=coord_font,
+            anchor="mm",
+        )
+        draw.text(
+            (x0 + 8 * dx + CANVAS_COORD_OFFSET_SIDE, y),
+            rank,
+            fill=BORDER_COLOR,
+            font=coord_font,
+            anchor="mm",
+        )
 
     for r in range(10):
         for c in range(9):
@@ -488,12 +522,7 @@ def main() -> None:
             fn = PUZZLES[puzzle_choice]
             if callable(fn):
                 fn()
-            st.session_state.mode = "setup"
-            st.session_state.pv = []
-            st.session_state.step = 0
-            st.session_state.result = None
-            st.session_state.selected = None
-            st.session_state.setup_canvas_nonce = cast(int, st.session_state.setup_canvas_nonce) + 1
+            _reset_to_setup()
             st.rerun()
 
         st.divider()
@@ -536,15 +565,8 @@ def main() -> None:
                 ):
                     st.session_state.board_grid = grid
                     st.session_state.turn = turn
-                    st.session_state.mode = "setup"
-                    st.session_state.pv = []
-                    st.session_state.step = 0
-                    st.session_state.result = None
-                    st.session_state.selected = None
                     st.session_state.upload_nonce = upload_nonce + 1
-                    st.session_state.setup_canvas_nonce = (
-                        cast(int, st.session_state.setup_canvas_nonce) + 1
-                    )
+                    _reset_to_setup()
                     logger.info("Game loaded | turn={}", turn)
                     st.rerun()
                 else:
@@ -567,35 +589,25 @@ def main() -> None:
 
             st.caption("Select a piece, then click a board cell:")
 
-            st.write("🔴 RED pieces:")
-            red_cols = st.columns(7)
-            for i, pt in enumerate(PIECE_ORDER):
-                key = f"RED_{pt.name}"
-                sym = PIECE_SYMBOLS[(Color.RED, pt)]
-                is_sel = st.session_state.selected == key
-                if red_cols[i].button(
-                    sym,
-                    key=f"pal_r_{pt.name}",
-                    type="primary" if is_sel else "secondary",
-                    help=f"RED {PIECE_LABEL[pt]}",
-                ):
-                    st.session_state.selected = None if is_sel else key
-                    st.rerun()
-
-            st.write("⚫ BLACK pieces:")
-            blk_cols = st.columns(7)
-            for i, pt in enumerate(PIECE_ORDER):
-                key = f"BLACK_{pt.name}"
-                sym = PIECE_SYMBOLS[(Color.BLACK, pt)]
-                is_sel = st.session_state.selected == key
-                if blk_cols[i].button(
-                    sym,
-                    key=f"pal_b_{pt.name}",
-                    type="primary" if is_sel else "secondary",
-                    help=f"BLACK {PIECE_LABEL[pt]}",
-                ):
-                    st.session_state.selected = None if is_sel else key
-                    st.rerun()
+            for color, label, key_prefix in [
+                (Color.RED, "🔴 RED pieces:", "pal_r_"),
+                (Color.BLACK, "⚫ BLACK pieces:", "pal_b_"),
+            ]:
+                color_name = "RED" if color == Color.RED else "BLACK"
+                st.write(label)
+                cols = st.columns(7)
+                for i, pt in enumerate(PIECE_ORDER):
+                    key = f"{color_name}_{pt.name}"
+                    sym = PIECE_SYMBOLS[(color, pt)]
+                    is_sel = st.session_state.selected == key
+                    if cols[i].button(
+                        sym,
+                        key=f"{key_prefix}{pt.name}",
+                        type="primary" if is_sel else "secondary",
+                        help=f"{color_name} {PIECE_LABEL[pt]}",
+                    ):
+                        st.session_state.selected = None if is_sel else key
+                        st.rerun()
 
             erase_col, clear_col = st.columns(2)
             is_erase = st.session_state.selected == "ERASE"
@@ -666,13 +678,7 @@ def main() -> None:
 
             st.divider()
             if st.button("← Back to Setup", use_container_width=True):
-                st.session_state.mode = "setup"
-                st.session_state.step = 0
-                st.session_state.auto_play = False
-                st.session_state.selected = None
-                st.session_state.setup_canvas_nonce = (
-                    cast(int, st.session_state.setup_canvas_nonce) + 1
-                )
+                _reset_to_setup()
                 st.rerun()
 
     # ── Main area ─────────────────────────────────────────────────────────────
@@ -713,9 +719,7 @@ def main() -> None:
 
         st.markdown("")
         first_col, prev_col, info_col, auto_col, next_col = st.columns([2, 2, 3, 2, 2])
-        if first_col.button(
-            "≪ First", disabled=(step == 0 or auto_play), use_container_width=True
-        ):
+        if first_col.button("≪ First", disabled=(step == 0 or auto_play), use_container_width=True):
             st.session_state.step = 0
             st.rerun()
         if prev_col.button("← Prev", disabled=(step == 0 or auto_play), use_container_width=True):
